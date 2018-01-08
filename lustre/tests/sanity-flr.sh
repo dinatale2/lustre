@@ -1529,6 +1529,24 @@ test_201() {
 }
 run_test 201 "FLR data mover"
 
+test_202() {
+	[[ $OSTCOUNT -lt 2 ]] && skip "need >= 2 OSTs" && return
+
+	local tf=$DIR/$tfile
+	local ids
+
+	$LFS setstripe -E 1M -c 1 $tf
+	ids=($($LFS getstripe $tf | awk '/lcme_id/{print $2}' | tr '\n' ' '))
+	verify_comp_attr stripe-count $tf ${ids[0]} 1
+
+	$LFS setstripe --component-add -E 2M -c -1 $tf
+	ids=($($LFS getstripe $tf | awk '/lcme_id/{print $2}' | tr '\n' ' '))
+	verify_comp_attr stripe-count $tf ${ids[0]} 1
+	verify_comp_attr stripe-count $tf ${ids[1]} $OSTCOUNT
+}
+run_test 202 "lfs setstripe --add-component wide striping"
+
+
 complete $SECONDS
 check_and_cleanup_lustre
 exit_status
