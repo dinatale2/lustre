@@ -62,6 +62,7 @@ static int jt_list_peer(int argc, char **argv);
 static int lnetctl_list_commands(int argc, char **argv);
 static int jt_import(int argc, char **argv);
 static int jt_export(int argc, char **argv);
+static int jt_update(int argc, char **argv);
 static int jt_ping(int argc, char **argv);
 static int jt_discover(int argc, char **argv);
 static int jt_lnet(int argc, char **argv);
@@ -84,6 +85,7 @@ command_t cmd_list[] = {
 			   " | discovery}"},
 	{"import", jt_import, 0, "import FILE.yaml"},
 	{"export", jt_export, 0, "export FILE.yaml"},
+	{"update", jt_update, 0, "update FILE.yaml"},
 	{"stats", jt_stats, 0, "stats {show | help}"},
 	{"global", jt_global, 0, "global {show | help}"},
 	{"peer", jt_peers, 0, "peer {add | del | show | help}"},
@@ -1074,6 +1076,94 @@ static int jt_set(int argc, char **argv)
 		return rc;
 
 	return Parser_execarg(argc - 1, &argv[1], set_cmds);
+}
+
+static int jt_update(int argc, char **argv)
+{
+	struct cYAML *err_rc = NULL;
+	struct cYAML *curr_cfg = NULL;
+	struct cYAML *curr_routes = NULL;
+	struct cYAML *new_cfg = NULL;
+	struct cYAML *new_routes = NULL;
+	char *file = NULL;
+	int rc = 0;
+
+	if (argc != 2)
+		return -1;
+
+	/* Ensure the configuration file is valid */
+	file = argv[1];
+	rc = lustre_yaml_config(file, &err_rc);
+	if (rc != LUSTRE_CFG_RC_NO_ERR)
+		goto err;
+
+	new_cfg = cYAML_build_tree(file, NULL, 0, &err_rc, false);
+	if (tree == NULL) {
+		rc = LUSTRE_CFG_RC_BAD_PARAM;
+		goto err;
+	}
+
+	/* prune routes that do no exist in new config */
+	rc = lustre_lnet_show_route(NULL, 1, -1, &curr_cfg, &err_rc, true);
+	if (rc != LUSTRE_CFG_RC_NO_ERR)
+		goto err;
+
+	curr_routes = cYAML_get_object_item(curr_cfg, "route");
+
+	/* update routes that exist, but differ or create a new route */
+	new_routes = cYAML_get_object_item(new_cfg, "route");
+	if (new_routes != NULL) {
+		if(!cYAML_is_sequence(new_routes)) {
+			rc = LUSTRE_CFG_RC_BAD_PARAM;
+			goto err;
+		}
+
+		struct cYAML *head;
+		struct cYAML *nw, *gw, *hop, *prio;
+		while ((head = cYAML_get_next_seq_item(new_routes, &item)) != NULL) {
+			nw = cYAML_get_object_item(route, "net");
+			gw = cYAML_get_object_item(route, "gateway");
+			hop = cYAML_get_object_item(route, "hop");
+			prio = cYAML_get_object_item(route, "priority");
+
+			if (nw == NULL || gw == NULL) {
+				rc = LUSTRE_CFG_RC_BAD_PARAM;
+				goto err;
+			}
+
+			rc = lustre_lnet_update_route(nw->cy_valuestring,
+						      gw->cy_valuestring,
+						      (hop ? hop->cy_valueint : -1),
+						      (prio ? prio->cy_valueint : -1),
+						      &err_rc);
+
+			if (rc == LUSTRE_CFG_RC_NO_MATCH) {
+				rc = lustre_lnet_config_route(nw->cy_valuestring,
+						      gw->cy_valuestring,
+	 					      (hop ? hop->cy_valueint : -1),
+						      (prio ? prio->cy_valueint : -1),
+						      &err_rc);
+			}
+
+			if (rc != LUSTRE_CFG_RC_NO_ERR)
+				goto err;
+		}
+	}
+	cYAML_free_tree();
+
+err:
+	if (rc < 0 && err_rc != NULL) {
+		printf("err\n");
+		cYAML_print_tree2file(stderr, err_rc);
+	}
+
+	if (err_rc != NULL)
+		cYAML_free_tree(err_rc);
+
+	if (tree != NULL)
+		cYAML_free_tree(tree);
+
+	return rc;
 }
 
 static int jt_import(int argc, char **argv)

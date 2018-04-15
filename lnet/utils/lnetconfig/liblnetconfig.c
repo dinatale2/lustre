@@ -950,6 +950,72 @@ out:
 	return rc;
 }
 
+int lustre_lnet_update_route(char *nw, char *gw, int hops, int prio,
+			     struct cYAML *err_rc)
+{
+	int rc;
+	struct lnet_ioctl_config_data data;
+
+	if (nw == NULL || gw == NULL)
+		return LUSTRE_CFG_RC_BAD_PARAM;
+
+	if (nw != LNET_NIDNET(LNET_NID_ANY)) {
+		net = libcfs_str2net(nw);
+		if (net == LNET_NIDNET(LNET_NID_ANY))
+			return LUSTRE_CFG_RC_BAD_PARAM;
+	} else {
+		return LUSTRE_CFG_RC_BAD_PARAM;
+	}
+
+	if (gw != LNET_NIDNET(LNET_NID_ANY)) {
+		gateway_nid = libcfs_str2nid(gw);
+		if (gateway_nid == LNET_NID_ANY)
+			return LUSTRE_CFG_RC_BAD_PARAM;
+	} else {
+		return LUSTRE_CFG_RC_BAD_PARAM;
+	}
+
+	if ((hops < 1 && hops != -1) || hops > 255)
+		return LUSTRE_CFG_RC_BAD_PARAM;
+
+	for (i = 0;; i++) {
+		LIBCFS_IOC_INIT_V2(data, cfg_hdr);
+		data.cfg_count = i;
+
+		rc = l_ioctl(LNET_DEV_ID, IOC_LIBCFS_GET_ROUTE, &data);
+		if (rc != 0)
+			break;
+
+		/* filter on provided data */
+		if (net != LNET_NIDNET(LNET_NID_ANY) &&
+		    net != data.cfg_net)
+			continue;
+
+		if (gateway_nid != LNET_NID_ANY &&
+		    gateway_nid != data.cfg_nid)
+			continue;
+
+		/* found the route, need to update it */
+		if (hops != data.cfg_config_u.cfg_route.rtr_hop ||
+		    prio != data.cfg_config_u.cfg_route.rtr_priority) {
+			/* delete and recreate the route */
+			rc = lustre_lnet_del_route(nw, gw, -1, err_rc);
+			if (rc != LUSTRE_CFG_RC_NO_ERR)
+				return rc;
+
+			rc = lustre_lnet_config_route(nw, gw, hops, prio, -1,
+						      err_rc);
+			if (rc != LUSTRE_CFG_RC_NO_ERR)
+				return rc;
+		}
+
+		/* we matched and if necessary updated our route, success! */
+		return LUSTRE_CFG_RC_NO_ERR;
+	}
+
+	return LUSTRE_CFG_RC_NO_MATCH;
+}
+
 int lustre_lnet_show_route(char *nw, char *gw, int hops, int prio, int detail,
 			   int seq_no, struct cYAML **show_rc,
 			   struct cYAML **err_rc, bool backup)

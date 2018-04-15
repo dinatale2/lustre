@@ -108,6 +108,8 @@ int lustre_lnet_config_route(char *nw, char *gw, int hops, int prio,
 int lustre_lnet_del_route(char *nw, char *gw, int seq_no,
 			  struct cYAML **err_rc);
 
+int lustre_lnet_update_route(char *nw, char *gw, int hops, int prio);
+
 /*
  * lustre_lnet_show_route
  *   Send down an IOCTL to the kernel to show routes
